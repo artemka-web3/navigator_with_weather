@@ -1,0 +1,793 @@
+<!--TODO: добавить скорость ветра слой-->
+<!DOCTYPE html>
+<html class='use-all-space'>
+<head>
+    <meta http-equiv='X-UA-Compatible' content='IE=Edge' />
+    <meta charset='UTF-8'>
+    <title>Maps SDK for Web - Routing with draggable marker and my location</title>
+    <meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no'/>
+    <link rel='stylesheet' type='text/css' href='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/maps/maps.css'>
+    <link rel='stylesheet' type='text/css' href='../assets/ui-library/index.css'/>
+    <link rel='stylesheet' type='text/css' href='https://api.tomtom.com/maps-sdk-for-web/cdn/plugins/SearchBox/3.2.0/SearchBox.css'/>
+    <link rel='stylesheet' type='text/css' href='../assets/ui-library/icons-css/routing.css'/>
+</head>
+<style>
+    /* Add your styles here */
+    .map-view .draggable-marker {
+        align-items: center;
+        background-color: #4a90e2;
+        border: solid 3px #2faaff;
+        border-radius: 50%;
+        display: flex;
+        height: 32px;
+        justify-content: center;
+        transition: width .1s, height .1s;
+        width: 32px;
+    }
+    body, html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        font-family: Arial, sans-serif;
+    }
+    .menu {
+        background-color: #333;
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        padding: 10px 0;
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        z-index: 1000;
+    }
+    .menu a {
+        color: #f2f2f2;
+        text-align: center;
+        padding: 14px 20px;
+        text-decoration: none;
+        font-size: 24px;
+        transition: background-color 0.3s, color 0.3s;
+    }
+    .menu a:hover {
+        background-color: #ddd;
+        color: black;
+    }
+    .map-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        width: 100%;
+        height: 100%;
+    }
+    #map {
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        touch-action: pan-x pan-y;
+    }
+    .leaflet-control-layers {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .tt-search-box-input {
+        width: calc(100% - 25px) !important;
+    }
+    @media (max-width: 768px) {
+        .leaflet-control-layers {
+            max-height: 200px;
+        }
+    }
+    .follow-button {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+        background-color: #fff;
+        border: none;
+        padding: 10px;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .map-view {
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+</style>
+<body>
+    <div class='map-view'>
+        <div id='map' class='map'>
+            <div id='foldable' class='tt-overlay-panel -left-top -medium js-foldable'>
+                <div class='icon-wrapper'>
+                    <div class='tt-icon icon-spacing -finish'></div> 
+                    <div id='finishSearchBox' class='tt-form-label'></div>
+                </div>
+            </div>
+            <button class="follow-button" id="followButton">Моя локация</button>
+
+        </div>
+        
+    </div>
+    
+    <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/maps/maps-web.min.js'></script>
+    <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/services/services-web.min.js'></script>
+    <script data-showable type='text/javascript' src='../assets/js/mobile-or-tablet.js'></script>
+    <script data-showable type='text/javascript' src='../assets/js/foldable.js'></script>
+    <script data-showable type='text/javascript' src='../assets/js/info-hint.js'></script>
+    <script data-showable type='text/javascript' src='../assets/js/search/searchbox-enter-submit.js'></script>
+    <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/plugins/SearchBox/3.2.0/SearchBox-web.js'></script>
+    <script>
+        var routeMarkers = {}, routePoints = {}, searchBoxes = {};
+        var finishMarkerElement = createMarkerElement('finish');
+        var startMarkerElement = createMarkerElement('start');
+        var errorHint = new InfoHint('error', 'bottom-center', 5000).addTo(document.getElementById('map'));
+        var loadingHint = new InfoHint('info', 'bottom-center').addTo(document.getElementById('map'));
+        var routeCoordinates = [];
+        var routePoints = {};
+        var searchBoxes = {};
+        var weatherMarkers = [];
+        var weatherPopups = [];
+        var followUser = true;
+        var weatherZoomLevel = 12; // Set the zoom level at which weather will be displayed
+        var weatherGridSize = 200; // Size of the grid around the user in meters
+        const weatherCache = new Map();
+        const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
+        let weatherUpdateTimeout;
+        const WEATHER_UPDATE_DELAY = 200; // 1 секунда
+        // Константы для погоды
+        const WEATHER_ZOOM_LEVEL = 12; // Минимальный зум для показа погоды
+        const GRID_SIZE = 500; // Размер сетки в метрах
+        const WEATHER_ICONS = {
+            'snow': '❄️',
+            'rain': '🌧️',
+            'clouds': '☁️',
+            'clear': '☀️'
+        };
+        const LOCATION_OPTIONS = {
+            enableHighAccuracy: true, // Высокая точность
+            maximumAge: 0,           // Всегда получать свежие данные
+            timeout: 5000            // Таймаут в 5 секунд
+        };
+        const WEATHER_UPDATE_INTERVAL = 10 * 60 * 1000; // 10 минут вместо 5
+        const WEATHER_CACHE_DURATION = 30 * 60 * 1000; // 30 минут кэширования
+        const MIN_UPDATE_INTERVAL = 1000; // Минимальный интервал между обновлениями
+        let weatherUpdateInterval;
+        // Функция создания точек сетки вокруг пользователя
+        function createWeatherGrid(userLocation, gridSize) {
+            const points = [];
+            const offset = gridSize / 111111; // Примерное преобразование метров в градусы
+            const minDistance = 100; // Минимальное расстояние в метрах
+
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const point = [
+                        userLocation[0] + j * offset,
+                        userLocation[1] + i * offset
+                    ];
+                    
+                    // Проверяем расстояние до пользователя
+                    const distance = calculateDistance(userLocation, point);
+                    
+                    // Добавляем точку только если она достаточно далеко от пользователя
+                    if (distance > minDistance) {
+                        points.push(point);
+                    }
+                }
+            }
+            return points;
+        }
+        // Функция для запуска периодического обновления погоды
+        function startWeatherUpdates(userLocation) {
+            // Очищаем предыдущий интервал если есть
+            if (weatherUpdateInterval) {
+                clearInterval(weatherUpdateInterval);
+            }
+
+            // Создаем новый интервал
+            weatherUpdateInterval = setInterval(() => {
+                if (map.getZoom() >= WEATHER_ZOOM_LEVEL) {
+                    updateWeather(userLocation);
+                }
+            }, WEATHER_UPDATE_INTERVAL);
+        }
+        // Оптимизированная функция получения погоды
+        async function getWeather(lat, lon) {
+            const key = `${lat},${lon}`;
+            const now = Date.now();
+            
+            // Проверяем кэш
+            if (weatherCache.has(key)) {
+                const cachedData = weatherCache.get(key);
+                if (now - cachedData.timestamp < CACHE_DURATION) {
+                    return cachedData.weather;
+                }
+            }
+
+            try {
+                const API_KEY = '2743b4a0f99648c34789d9dcfb3ad81d';
+                const response = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}`);
+                const data = await response.json();
+                const weather = data.weather[0].main.toLowerCase();
+                
+                // Сохраняем в кэш
+                weatherCache.set(key, {
+                    weather,
+                    timestamp: now
+                });
+                
+                return weather;
+            } catch (error) {
+                console.error('Error fetching weather:', error);
+                return 'clear';
+            }
+        }
+
+        // Дебаунсинг обновления погоды
+        function debouncedUpdateWeather(userLocation) {
+            if (weatherUpdateTimeout) {
+                clearTimeout(weatherUpdateTimeout);
+            }
+            
+            weatherUpdateTimeout = setTimeout(() => {
+                updateWeather(userLocation);
+            }, WEATHER_UPDATE_DELAY);
+        }
+        // Функция создания маркера погоды
+        const markerPool = [];
+        function createWeatherMarker(weather, lngLat) {
+            // Переиспользуем маркеры из пула
+            let marker = markerPool.pop();
+            if (!marker) {
+                const markerElement = document.createElement('div');
+                markerElement.style.width = '48px';
+                markerElement.style.height = '48px';
+                marker = new tt.Marker({element: markerElement});
+            }
+            
+            marker.getElement().style.backgroundImage = `url(assets/weather/${weather}.png)`;
+            marker.setLngLat(lngLat).addTo(map);
+            return marker;
+        }
+        const weatherTypes = ['clear', 'clouds', 'rain', 'snow'];
+        weatherTypes.forEach(type => {
+            const img = new Image();
+            img.src = `assets/weather/${type}.png`;
+        });
+        async function updateWeather(userLocation) {
+            // Очищаем старые маркеры погоды
+            weatherMarkers.forEach(marker => marker.remove());
+            weatherMarkers = [];
+
+            if (map.getZoom() < WEATHER_ZOOM_LEVEL) {
+                return;
+            }
+
+            // Создаем сетку точек
+            const gridPoints = createWeatherGrid(userLocation, GRID_SIZE);
+
+            // Получаем и отображаем погоду для каждой точки
+            for (const point of gridPoints) {
+                const weather = await getWeather(point[1], point[0]);
+                const marker = createWeatherMarker(weather, point);
+                weatherMarkers.push(marker);
+            }
+        }
+
+        // Initialize the map
+        var userMarker;
+        var map = tt.map({
+            key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+            container: 'map',
+            dragPan: true, // Разрешаем перемещение карты на всех устройствах
+            zoom: 15,
+            center: [51.505, -0.09],
+            preferCanvas: true
+        });
+        map.addControl(new tt.FullscreenControl());
+        map.addControl(new tt.NavigationControl());
+        new Foldable('#foldable', 'top-right');
+        function calculateBearing(start, end) {
+            const startLat = start[1] * Math.PI / 180;
+            const startLng = start[0] * Math.PI / 180;
+            const endLat = end[1] * Math.PI / 180;
+            const endLng = end[0] * Math.PI / 180;
+
+            const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+            const x = Math.cos(startLat) * Math.sin(endLat) -
+                Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+            const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            return bearing;
+        }
+        function calculateDistance(point1, point2) {
+            const lat1 = point1[1] * Math.PI / 180;
+            const lat2 = point2[1] * Math.PI / 180;
+            const lon1 = point1[0] * Math.PI / 180;
+            const lon2 = point2[0] * Math.PI / 180;
+            
+            const R = 6371e3; // радиус Земли в метрах
+            const x = (lon2 - lon1) * Math.cos((lat1 + lat2) / 2);
+            const y = (lat2 - lat1);
+            const d = Math.sqrt(x * x + y * y) * R;
+            
+            return d;
+        }
+        
+        function createArrowMarker() {
+            // Создаем контейнер для маркера
+            const markerDiv = document.createElement('div');
+            markerDiv.className = 'draggable-marker';
+            markerDiv.style.width = '32px';
+            markerDiv.style.height = '32px';
+
+            // Создаем SVG стрелку
+            const svg = `
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="14" fill="#4a90e2" stroke="#2faaff" stroke-width="2"/>
+                <path d="M16 6L22 26L16 20L10 26L16 6Z" fill="#ffffff"/>
+            </svg>`;
+
+            markerDiv.innerHTML = svg;
+            return markerDiv;
+        }
+    
+
+
+        function createUserMarker(position) {
+            if (!userMarker) {
+                const markerElement = createArrowMarker();
+                userMarker = new tt.Marker({
+                    draggable: true,
+                    element: markerElement,
+                    rotationAlignment: 'map',
+                    pitchAlignment: 'map'
+                })
+                .setLngLat([position.coords.longitude, position.coords.latitude])
+                .addTo(map);
+
+                userMarker.on('dragend', function() {
+                    const newPos = userMarker.getLngLat();
+                    routePoints.start = [newPos.lng, newPos.lat];
+                    if (routePoints.finish) {
+                        handleDrawRoute('finish');
+                    }
+                });
+            }
+            return userMarker;
+        }
+
+
+        map.on('zoomend', function() {
+            if (userMarker) {
+                const userLocation = userMarker.getLngLat();
+                const currentZoom = map.getZoom();
+                
+                if (currentZoom < WEATHER_ZOOM_LEVEL) {
+                    // Если зум меньше порога - очищаем маркеры
+                    weatherMarkers.forEach(marker => marker.remove());
+                    weatherMarkers = [];
+                } else {
+                    // Если зум достаточный - обновляем погоду
+                    debouncedUpdateWeather([userLocation.lng, userLocation.lat]);
+                }
+            }
+        });
+
+        map.on('pitchend', function() {
+            console.log('Pitch level: ', map.getPitch());
+        });
+
+        map.on('dragstart', function() {
+            followUser = false;
+        });
+        // Initialize the geolocate control
+
+        map.on('load', function() {
+    
+            // Only create finish search box
+            searchBoxes.finish = createSearchBox('finish');
+            
+            // Set initial user location as start point if available
+            let lastUpdate = 0;
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(function(position) {
+                    const userLocation = [position.coords.longitude, position.coords.latitude];
+                    const heading = position.coords.heading || 0;
+                    const now = Date.now();
+                    if (now - lastUpdate < MIN_UPDATE_INTERVAL) return;
+                    lastUpdate = now;
+                    // Обновляем маркер пользователя
+                    if (!userMarker) {
+                        userMarker = createUserMarker(position);
+                    } else {
+                        userMarker.setLngLat(userLocation);
+                        userMarker.setRotation(heading);
+                    }
+
+                    // Обновляем позицию старта маршрута
+                    routePoints.start = userLocation;
+
+                    // Если включен режим следования и есть маршрут
+                    if (followUser && routePoints.finish) {
+                        // Находим ближайший сегмент маршрута
+                        if (routeCoordinates && routeCoordinates.length > 1) {
+                            let minDistance = Infinity;
+                            let nearestIndex = 0;
+
+                            // Ищем ближайшую точку маршрута
+                            routeCoordinates.forEach((point, index) => {
+                                const d = calculateDistance(userLocation, point);
+                                if (d < minDistance) {
+                                    minDistance = d;
+                                    nearestIndex = index;
+                                }
+                            });
+
+                            // Рассчитываем угол поворота к следующей точке маршрута
+                            if (nearestIndex < routeCoordinates.length - 1) {
+                                const nextPoint = routeCoordinates[nearestIndex + 1];
+                                const bearing = calculateBearing(userLocation, nextPoint);
+
+                                // Плавно поворачиваем карту
+                                map.easeTo({
+                                    center: userLocation,
+                                    bearing: bearing,
+                                    pitch: 60,
+                                    duration: 1000
+                                });
+                            }
+                        } else {
+                            // Если маршрут не построен, просто следуем за пользователем
+                            map.easeTo({
+                                center: userLocation,
+                                bearing: heading,
+                                pitch: 0,
+                                duration: 1000
+                            });
+                        }
+                    }
+                    if (map.getZoom() >= WEATHER_ZOOM_LEVEL) {
+                        updateWeather([position.coords.longitude, position.coords.latitude]);
+                    }
+                    startWeatherUpdates(userLocation);
+                }, 
+                function(error) {
+                    console.error('Error getting location:', error);
+                },
+                LOCATION_OPTIONS
+                );
+            }
+        });
+        function updateMapViewWithDirection(position) {
+            map.easeTo({
+                center: position,
+                zoom: 18, // Увеличиваем zoom для лучшего обзора текущей локации
+                pitch: 0, // Добавляем наклон для лучшего обзора маршрута
+                duration: 1000 // Добавляем плавную анимацию
+            });
+        }
+
+        document.getElementById('followButton').addEventListener('click', function() {
+            followUser = true;
+            if (userMarker) {
+                var userLocation = userMarker.getLngLat();
+                // Передаем только позицию, без поворота
+                updateMapViewWithDirection(userLocation);
+            }
+        });
+
+        function createSearchBox(type) {
+            var searchBox = new tt.plugins.SearchBox(tt.services, {
+                showSearchButton: false,
+                searchOptions: {
+                    key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5'
+                },
+                labels: {
+                    placeholder: 'Куда хотите приехать?'
+                }
+            });
+
+            document.getElementById(type + 'SearchBox').appendChild(searchBox.getSearchBoxHTML());
+            searchBox.on('tomtom.searchbox.resultscleared', onResultCleared.bind(null, type));
+
+            searchBox.on('tomtom.searchbox.resultsfound', function(event) {
+                handleEnterSubmit(event, onResultSelected.bind(this), errorHint, type);
+            });
+
+            searchBox.on('tomtom.searchbox.resultselected', function(event) {
+                if (event.data && event.data.result) {
+                    onResultSelected(event.data.result, type);
+                }
+            });
+
+            return searchBox;
+        }
+
+        function createMarkerElement(type) {
+            var element = document.createElement('div');
+            var innerElement = document.createElement('div');
+
+            element.className = 'draggable-marker';
+            innerElement.className = 'tt-icon -white -' + type;
+            element.appendChild(innerElement);
+            return element;
+        }
+
+        function createMarker(type, lngLat) {
+            var markerElement = type === 'start' ? startMarkerElement : finishMarkerElement;
+
+            return new tt.Marker({ draggable: true, element: markerElement })
+                .setLngLat(lngLat)
+                .addTo(map)
+                .on('dragend', getDraggedMarkerPosition.bind(null, type));
+        }
+
+        function getDraggedMarkerPosition(type) {
+            var lngLat = routeMarkers[type].getLngLat();
+
+            performReverseGeocodeRequest(lngLat)
+                .then(function(response) {
+                    var addresses = response.addresses[0];
+                    var freeFormAddress = addresses.address.freeformAddress;
+
+                    if (!freeFormAddress) {
+                        loadingHint.hide();
+                        clearMap();
+                        errorHint.setMessage('Address not found, please choose a different place');
+                        return;
+                    }
+                    searchBoxes[type]
+                        .getSearchBoxHTML()
+                        .querySelector('input.tt-search-box-input')
+                        .value = freeFormAddress;
+                    var position = {
+                        lng: addresses.position.lng,
+                        lat: addresses.position.lat
+                    };
+
+                    updateMapView(type, position);
+                });
+        }
+
+        function onResultCleared(type) {
+            routePoints[type] = null;
+            if (routeMarkers[type]) {
+                routeMarkers[type].remove();
+                routeMarkers[type] = null;
+            }
+            if (routePoints.start || routePoints.finish) {
+                var lngLat = type === 'start' ? routePoints.finish : routePoints.start;
+                clearMap();
+                centerMap(lngLat);
+            }
+        }
+        function onResultSelected(result, type) {
+            var position = result.position;
+            
+            // Обновляем точку финиша
+            if (type === 'finish') {
+                routePoints.finish = [position.lng, position.lat];
+                
+                // Создаем или обновляем маркер финиша
+                if (routeMarkers.finish) {
+                    routeMarkers.finish.remove(); // Удаляем старый маркер
+                }
+                
+                // Создаем новый маркер финиша
+                routeMarkers.finish = new tt.Marker({
+                    element: finishMarkerElement
+                })
+                .setLngLat([position.lng, position.lat])
+                .addTo(map);
+                
+                // Проверяем наличие стартовой точки и строим маршрут
+                if (userMarker) {
+                    var startPos = userMarker.getLngLat();
+                    routePoints.start = [startPos.lng, startPos.lat];
+                    handleDrawRoute('finish');
+                }
+            }
+        }
+
+        function performCalculateRouteRequest() {
+            if (!routePoints.start || !routePoints.finish) {
+                return Promise.reject('Missing start or finish point');
+            }
+            return tt.services.calculateRoute({
+                key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+                traffic: false,
+                locations: routePoints.start.join() + ':' + routePoints.finish.join()
+            });
+        }
+
+        function performReverseGeocodeRequest(lngLat) {
+            return tt.services.reverseGeocode({
+                key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+                position: lngLat
+            });
+        }
+
+        function updateMapView(type, position) {
+            // Убедимся, что координаты сохраняются в правильном формате
+            routePoints[type] = [position.lng, position.lat];
+            console.log('Updated route points:', routePoints);
+
+            if (routePoints.start && routePoints.finish) {
+                handleDrawRoute(type);
+            } else {
+                addRouteMarkers(type);
+                centerMap(routePoints[type]);
+            }
+        }
+        function updateUserLocation(position) {
+            var userLocation = [position.coords.longitude, position.coords.latitude];
+            var heading = position.coords.heading || 0;
+            
+            if (!userMarker) {
+                userMarker = new tt.Marker({
+                    draggable: true,
+                    element: createArrowMarker(),
+                    rotationAlignment: 'map'
+                })
+                .setLngLat(userLocation)
+                .addTo(map);
+                
+                userMarker.on('dragend', function() {
+                    var newPos = userMarker.getLngLat();
+                    routePoints.start = [newPos.lng, newPos.lat];
+                    if (routePoints.finish) {
+                        handleDrawRoute('finish');
+                    }
+                });
+            } else {
+                userMarker.setLngLat(userLocation);
+                userMarker.setRotation(heading);
+            }
+            
+            routePoints.start = userLocation;
+            if (routePoints.finish && followUser) {
+                handleDrawRoute('finish');
+            }
+        }
+        function handleDrawRoute(type) {
+            // Проверяем наличие точек маршрута
+            if (!routePoints.start || !routePoints.finish) {
+                console.log('Missing route points:', routePoints);
+                return;
+            }
+
+            // Показываем индикатор загрузки
+            errorHint.hide();
+            loadingHint.setMessage('Строим маршрут...');
+
+            // Форматируем координаты
+            const startCoords = Array.isArray(routePoints.start) ? 
+                routePoints.start.join(',') : 
+                `${routePoints.start[0]},${routePoints.start[1]}`;
+            
+            const finishCoords = Array.isArray(routePoints.finish) ? 
+                routePoints.finish.join(',') : 
+                `${routePoints.finish[0]},${routePoints.finish[1]}`;
+
+            // Вызываем сервис построения маршрута
+            tt.services.calculateRoute({
+                key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+                traffic: false,
+                locations: `${startCoords}:${finishCoords}`
+            })
+            .then(function(response) {
+                const geojson = response.toGeoJson();
+                
+                // Очищаем предыдущий маршрут
+                clearMap();
+
+                // Добавляем новый маршрут на карту
+                map.addLayer({
+                    'id': 'route',
+                    'type': 'line',
+                    'source': {
+                        'type': 'geojson',
+                        'data': geojson
+                    },
+                    'paint': {
+                        'line-color': '#4a90e2',
+                        'line-width': 6
+                    }
+                });
+
+                // Подстраиваем видимую область карты под маршрут
+                const bounds = new tt.LngLatBounds();
+                geojson.features[0].geometry.coordinates.forEach(point => {
+                    bounds.extend(tt.LngLat.convert(point));
+                });
+                map.fitBounds(bounds, { padding: 50 });
+
+                loadingHint.hide();
+            })
+            .catch(function(error) {
+                console.error('Route calculation error:', error);
+                errorHint.setMessage('Ошибка построения маршрута');
+                loadingHint.hide();
+            });
+        }
+
+        function performCalculateRouteRequest() {
+            // Добавляем проверку и логирование
+            console.log('Start point:', routePoints.start);
+            console.log('Finish point:', routePoints.finish);
+
+            if (!routePoints.start || !routePoints.finish) {
+                return Promise.reject('Missing start or finish point');
+            }
+
+            // Убедимся, что координаты в правильном формате
+            const startCoords = Array.isArray(routePoints.start) ? 
+                routePoints.start.join(',') : 
+                `${routePoints.start.lng},${routePoints.lat}`;
+            
+            const finishCoords = Array.isArray(routePoints.finish) ? 
+                routePoints.finish.join(',') : 
+                `${routePoints.finish.lng},${routePoints.finish.lat}`;
+
+            console.log('Route request:', `${startCoords}:${finishCoords}`);
+
+            return tt.services.calculateRoute({
+                key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+                traffic: false,
+                locations: `${startCoords}:${finishCoords}`
+            })
+            .then(response => {
+                console.log('Route calculated successfully');
+                return response;
+            })
+            .catch(error => {
+                console.error('Route calculation error:', error);
+                throw error;
+            });
+        }
+        function performReverseGeocodeRequest(lngLat) {
+            return tt.services.reverseGeocode({
+                key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
+                position: lngLat
+            });
+        }
+        function addRouteMarkers(type, point) {
+            var lngLat = point && point[type + 'Point'] || routePoints[type];
+
+            if (!routeMarkers[type] && routePoints[type]) {
+                routeMarkers[type] = createMarker(type, lngLat);
+            }
+            if (routeMarkers[type]) {
+                routeMarkers[type].setLngLat(routePoints[type]);
+            }
+        }
+
+        function clearMap() {
+            if (map.getLayer('route')) {
+                map.removeLayer('route');
+                map.removeSource('route');
+            }
+            weatherMarkers.forEach(marker => marker.remove());
+            weatherMarkers = [];
+        }
+
+        function centerMap(lngLat) {
+            map.flyTo({
+                center: lngLat,
+                speed: 10,
+                zoom: 8
+            });
+        }
+        window.addEventListener('beforeunload', () => {
+            if (weatherUpdateInterval) {
+                clearInterval(weatherUpdateInterval);
+            }
+        });
+    </script>
+</body>
+</html>
