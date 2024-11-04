@@ -98,7 +98,50 @@
         -webkit-user-select: none;
         user-select: none;
     }
+    .navigation-panel {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        padding: 16px;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        z-index: 1000;
+        transition: transform 0.3s ease;
+    }
 
+    .hidden {
+        transform: translateY(100%);
+    }
+
+    .nav-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        font-size: 18px;
+        font-weight: bold;
+    }
+
+    .nav-instruction {
+        padding: 12px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        margin-bottom: 12px;
+    }
+
+    .nav-controls {
+        display: flex;
+        gap: 12px;
+    }
+
+    .nav-controls button {
+        flex: 1;
+        padding: 12px;
+        border: none;
+        border-radius: 24px;
+        font-size: 16px;
+        cursor: pointer;
+    }
 </style>
 <body>
     <div class='map-view'>
@@ -114,7 +157,20 @@
         </div>
         
     </div>
-    
+    <div id="navigation-panel" class="navigation-panel hidden">
+        <div class="nav-header">
+            <span id="distance-remaining">-- км</span>
+            <span id="time-remaining">-- мин</span>
+        </div>
+        <div class="nav-instruction" id="current-instruction">
+            <!-- Текущая инструкция -->
+        </div>
+        <div class="nav-controls">
+            <button id="startNavigation">Начать</button>
+            <button id="stopNavigation">Завершить</button>
+        </div>
+    </div>
+
     <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/maps/maps-web.min.js'></script>
     <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.1/services/services-web.min.js'></script>
     <script data-showable type='text/javascript' src='../assets/js/mobile-or-tablet.js'></script>
@@ -158,6 +214,92 @@
         const WEATHER_CACHE_DURATION = 30 * 60 * 1000; // 30 минут кэширования
         const MIN_UPDATE_INTERVAL = 1000; // Минимальный интервал между обновлениями
         let weatherUpdateInterval;
+        let isNavigating = false;
+        let currentRouteIndex = 0;
+        const speechSynthesis = window.speechSynthesis;
+
+        function startNavigation() {
+            isNavigating = true;
+            followUser = true;
+            document.getElementById('navigation-panel').classList.remove('hidden');
+            updateNavigationInfo();
+        }
+
+        function stopNavigation() {
+            isNavigating = false;
+            followUser = false;
+            document.getElementById('navigation-panel').classList.add('hidden');
+        }
+
+        function updateNavigationInfo() {
+            if (!isNavigating || !routeCoordinates) return;
+
+            const userLocation = userMarker.getLngLat();
+            let minDistance = Infinity;
+            let nearestIndex = 0;
+
+            // Находим ближайшую точку маршрута
+            routeCoordinates.forEach((point, index) => {
+                const d = calculateDistance([userLocation.lng, userLocation.lat], point);
+                if (d < minDistance) {
+                    minDistance = d;
+                    nearestIndex = index;
+                }
+            });
+
+            // Обновляем информацию о маршруте
+            const remainingPoints = routeCoordinates.slice(nearestIndex);
+            const remainingDistance = calculateRouteDistance(remainingPoints);
+            const estimatedTime = calculateEstimatedTime(remainingDistance);
+            
+            document.getElementById('distance-remaining').textContent = 
+                `${(remainingDistance/1000).toFixed(1)} км`;
+            document.getElementById('time-remaining').textContent = 
+                `${Math.round(estimatedTime)} мин`;
+
+            // Определяем следующий маневр
+            if (nearestIndex < routeCoordinates.length - 1) {
+                const nextPoint = routeCoordinates[nearestIndex + 1];
+                const bearing = calculateBearing([userLocation.lng, userLocation.lat], nextPoint);
+                const instruction = getNavigationInstruction(bearing);
+                
+                document.getElementById('current-instruction').textContent = instruction;
+                
+                // Голосовая подсказка при приближении к повороту
+                if (minDistance < 50) { // 50 метров до поворота
+                    speakInstruction(instruction);
+                }
+            }
+        }
+
+        function calculateRouteDistance(points) {
+            let distance = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                distance += calculateDistance(points[i], points[i + 1]);
+            }
+            return distance;
+        }
+
+        function calculateEstimatedTime(distance) {
+            const avgSpeed = 40; // km/h
+            return (distance / 1000) / (avgSpeed / 60); // минуты
+        }
+
+        function getNavigationInstruction(bearing) {
+            if (bearing < 22.5) return "Двигайтесь прямо";
+            if (bearing < 67.5) return "Поверните направо";
+            if (bearing < 112.5) return "Развернитесь";
+            if (bearing < 157.5) return "Поверните налево";
+            return "Двигайтесь прямо";
+        }
+
+        function speakInstruction(instruction) {
+            if (speechSynthesis.speaking) return;
+            const utterance = new SpeechSynthesisUtterance(instruction);
+            utterance.lang = 'ru-RU';
+            speechSynthesis.speak(utterance);
+        }
+        
         // Функция создания точек сетки вокруг пользователя
         function createWeatherGrid(userLocation, gridSize) {
             const points = [];
@@ -230,54 +372,107 @@
 
         // Дебаунсинг обновления погоды
         function debouncedUpdateWeather(userLocation) {
+            console.log('Debounce called for weather update');
             if (weatherUpdateTimeout) {
+                console.log('Clearing previous timeout');
                 clearTimeout(weatherUpdateTimeout);
             }
             
             weatherUpdateTimeout = setTimeout(() => {
+                console.log('Executing delayed weather update');
                 updateWeather(userLocation);
             }, WEATHER_UPDATE_DELAY);
         }
         // Функция создания маркера погоды
         const markerPool = [];
         function createWeatherMarker(weather, lngLat) {
-            // Переиспользуем маркеры из пула
-            let marker = markerPool.pop();
-            if (!marker) {
-                const markerElement = document.createElement('div');
-                markerElement.style.width = '48px';
-                markerElement.style.height = '48px';
-                marker = new tt.Marker({element: markerElement});
-            }
+            console.log('Creating weather marker:', weather, lngLat);
             
-            marker.getElement().style.backgroundImage = `url(assets/weather/${weather}.png)`;
-            marker.setLngLat(lngLat).addTo(map);
-            return marker;
-        }
-        const weatherTypes = ['clear', 'clouds', 'rain', 'snow'];
-        weatherTypes.forEach(type => {
-            const img = new Image();
-            img.src = `assets/weather/${type}.png`;
-        });
-        async function updateWeather(userLocation) {
-            // Очищаем старые маркеры погоды
-            weatherMarkers.forEach(marker => marker.remove());
-            weatherMarkers = [];
+            try {
+                // Получаем маркер из пула или создаем новый
+                let marker = markerPool.pop();
+                if (!marker) {
+                    const markerElement = document.createElement('div');
+                    markerElement.style.width = '48px';
+                    markerElement.style.height = '48px';
+                    markerElement.style.backgroundSize = 'contain';
+                    markerElement.style.backgroundRepeat = 'no-repeat';
+                    markerElement.style.backgroundPosition = 'center';
+                    
+                    marker = new tt.Marker({
+                        element: markerElement,
+                        anchor: 'center'
+                    });
+                }
 
-            if (map.getZoom() < WEATHER_ZOOM_LEVEL) {
-                return;
+                // Проверяем валидность координат
+                if (!lngLat || !Array.isArray(lngLat) || lngLat.length !== 2) {
+                    console.error('Invalid coordinates:', lngLat);
+                    return null;
+                }
+
+                // Обновляем иконку погоды
+                const element = marker.getElement();
+                element.style.backgroundImage = `url(assets/weather/${weather}.png)`;
+
+                // Устанавливаем позицию и добавляем на карту
+                marker.setLngLat(lngLat);
+                
+                // Проверяем, не добавлен ли уже маркер на карту
+                if (!marker.getElement().parentNode) {
+                    marker.addTo(map);
+                }
+
+                console.log('Weather marker created successfully');
+                return marker;
+            } catch (error) {
+                console.error('Error creating weather marker:', error);
+                return null;
             }
+        }
+        function clearWeatherMarkers() {
+            if (weatherMarkers.length) {
+                weatherMarkers.forEach(marker => {
+                    if (marker) {
+                        marker.remove();
+                        markerPool.push(marker); // Возвращаем в пул
+                    }
+                });
+                weatherMarkers = [];
+            }
+        }
 
-            // Создаем сетку точек
+    // Улучшенная функция обновления погоды
+    async function updateWeather(userLocation) {
+        console.log('Updating weather markers');
+        
+        // Проверяем зум
+        if (map.getZoom() < WEATHER_ZOOM_LEVEL) {
+            console.log('Zoom too low, clearing markers');
+            clearWeatherMarkers();
+            return;
+        }
+
+        try {
+            // Очищаем старые маркеры
+            clearWeatherMarkers();
+
+            // Создаем новые маркеры
             const gridPoints = createWeatherGrid(userLocation, GRID_SIZE);
-
-            // Получаем и отображаем погоду для каждой точки
+            
             for (const point of gridPoints) {
                 const weather = await getWeather(point[1], point[0]);
                 const marker = createWeatherMarker(weather, point);
-                weatherMarkers.push(marker);
+                if (marker) {
+                    weatherMarkers.push(marker);
+                }
             }
+            
+            console.log(`Created ${weatherMarkers.length} weather markers`);
+        } catch (error) {
+            console.error('Error updating weather markers:', error);
         }
+    }
 
         // Initialize the map
         var userMarker;
@@ -288,6 +483,47 @@
             zoom: 15,
             center: [51.505, -0.09],
             preferCanvas: true
+        });
+        // Добавить после инициализации карты
+        document.addEventListener('DOMContentLoaded', function() {
+            // Получаем элементы управления
+            const navigationPanel = document.getElementById('navigation-panel');
+            const startButton = document.getElementById('startNavigation');
+            const stopButton = document.getElementById('stopNavigation');
+
+            // Обработчики для кнопок
+            startButton.addEventListener('click', function() {
+                isNavigating = true;
+                followUser = true;
+                navigationPanel.classList.remove('hidden');
+                
+                // Установка начального вида
+                if (userMarker) {
+                    const userLocation = userMarker.getLngLat();
+                    map.easeTo({
+                        center: userLocation,
+                        zoom: 18,
+                        pitch: 0,
+                        duration: 1000
+                    });
+                }
+                
+                // Запуск обновления информации
+                updateNavigationInfo();
+            });
+
+            stopButton.addEventListener('click', function() {
+                isNavigating = false;
+                followUser = false;
+                navigationPanel.classList.add('hidden');
+            });
+
+            // Регулярное обновление информации о маршруте
+            setInterval(() => {
+                if (isNavigating && routeCoordinates) {
+                    updateNavigationInfo();
+                }
+            }, 1000);
         });
         map.addControl(new tt.FullscreenControl());
         map.addControl(new tt.NavigationControl());
@@ -401,6 +637,7 @@
                     const now = Date.now();
                     if (now - lastUpdate < MIN_UPDATE_INTERVAL) return;
                     lastUpdate = now;
+                    
                     // Обновляем маркер пользователя
                     if (!userMarker) {
                         userMarker = createUserMarker(position);
@@ -437,7 +674,7 @@
                                 map.easeTo({
                                     center: userLocation,
                                     bearing: bearing,
-                                    pitch: 60,
+                                    pitch: 0,
                                     duration: 1000
                                 });
                             }
@@ -707,7 +944,14 @@
                 });
                 map.fitBounds(bounds, { padding: 50 });
 
+                // Сохраняем маршрут
+                routeCoordinates = geojson.features[0].geometry.coordinates;
+                
+                // Показываем панель навигации
+                document.getElementById('navigation-panel').classList.remove('hidden');
+                
                 loadingHint.hide();
+
             })
             .catch(function(error) {
                 console.error('Route calculation error:', error);
@@ -788,6 +1032,8 @@
                 clearInterval(weatherUpdateInterval);
             }
         });
+        document.getElementById('startNavigation').addEventListener('click', startNavigation);
+        document.getElementById('stopNavigation').addEventListener('click', stopNavigation);
     </script>
 </body>
 </html>
