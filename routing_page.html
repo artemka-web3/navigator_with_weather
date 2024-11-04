@@ -142,6 +142,55 @@
         font-size: 16px;
         cursor: pointer;
     }
+    .layer-control {
+        position: absolute;
+        top: 60px;
+        right: 10px;
+        background: white;
+        padding: 8px;
+        border-radius: 4px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        z-index: 1000;
+    }
+
+    .wind-toggle {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .wind-toggle input {
+        margin-right: 8px;
+    }
+
+    .label-text {
+        font-size: 14px;
+        color: #333;
+    }
+    .layer-toggle {
+        position: absolute;
+        top: 80px;  /* Position below "Моя локация" button */
+        right: 10px;
+        z-index: 1000;
+        padding: 8px 12px;
+        background-color: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: block; /* Ensure button is displayed as block */
+    }
+
+    .layer-toggle:hover {
+        background-color: #f5f5f5;
+    }
+
+    .layer-toggle.active {
+        background-color: #4CAF50;
+        color: white;
+    }
 </style>
 <body>
     <div class='map-view'>
@@ -153,7 +202,6 @@
                 </div>
             </div>
             <button class="follow-button" id="followButton">Моя локация</button>
-
         </div>
         
     </div>
@@ -179,6 +227,7 @@
     <script data-showable type='text/javascript' src='../assets/js/search/searchbox-enter-submit.js'></script>
     <script src='https://api.tomtom.com/maps-sdk-for-web/cdn/plugins/SearchBox/3.2.0/SearchBox-web.js'></script>
     <script>
+        let map;
         var routeMarkers = {}, routePoints = {}, searchBoxes = {};
         var finishMarkerElement = createMarkerElement('finish');
         var startMarkerElement = createMarkerElement('start');
@@ -203,7 +252,7 @@
             'snow': '❄️',
             'rain': '🌧️',
             'clouds': '☁️',
-            'clear': '☀️'
+            'clear': '☀️',
         };
         const LOCATION_OPTIONS = {
             enableHighAccuracy: true, // Высокая точность
@@ -217,6 +266,12 @@
         let isNavigating = false;
         let currentRouteIndex = 0;
         const speechSynthesis = window.speechSynthesis;
+
+
+        const apiKey = '2743b4a0f99648c34789d9dcfb3ad81d';
+        const windSpeedUrl = `https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid=${apiKey}`;
+
+        
 
         function startNavigation() {
             isNavigating = true;
@@ -463,6 +518,7 @@
             for (const point of gridPoints) {
                 const weather = await getWeather(point[1], point[0]);
                 const marker = createWeatherMarker(weather, point);
+
                 if (marker) {
                     weatherMarkers.push(marker);
                 }
@@ -472,11 +528,12 @@
         } catch (error) {
             console.error('Error updating weather markers:', error);
         }
+
     }
 
         // Initialize the map
         var userMarker;
-        var map = tt.map({
+        map = tt.map({
             key: 'poNLFAmAjT4yDNfltAgseReaM8872GV5',
             container: 'map',
             dragPan: true, // Разрешаем перемещение карты на всех устройствах
@@ -484,6 +541,10 @@
             center: [51.505, -0.09],
             preferCanvas: true
         });
+
+        
+
+        
         // Добавить после инициализации карты
         document.addEventListener('DOMContentLoaded', function() {
             // Получаем элементы управления
@@ -624,10 +685,9 @@
         // Initialize the geolocate control
 
         map.on('load', function() {
-    
             // Only create finish search box
             searchBoxes.finish = createSearchBox('finish');
-            
+            addWindSpeedLayer()
             // Set initial user location as start point if available
             let lastUpdate = 0;
             if (navigator.geolocation) {
