@@ -687,36 +687,59 @@
         // Initialize the map
         var userMarker;
         let lastBearing = 0;
-        const SMOOTHING_FACTOR = 0.1;
+        const SMOOTHING_FACTOR = 0.05; // Reduced for smoother transitions
+        const ANIMATION_FRAMES = 60; // More frames for smoother animation
 
         function handleDeviceOrientation(event) {
             if (!event.alpha) return;
             
-            let bearing = event.alpha;
-            if (event.webkitCompassHeading) {
-                bearing = event.webkitCompassHeading;
-            } else {
-                bearing = 360 - event.alpha;
-            }
-
-            // Smooth bearing changes
-            bearing = smoothBearing(bearing);
-
-            if (userMarker) {
-                userMarker.setRotation(bearing);
+            let targetBearing = event.webkitCompassHeading || (360 - event.alpha);
+            
+            // Enhanced smooth bearing changes
+            let currentBearing = lastBearing;
+            let frame = 0;
+            
+            function animate() {
+                if (frame >= ANIMATION_FRAMES) return;
                 
-                if (isNavigating && followUser) {
-                    map.easeTo({
-                        bearing: bearing,
-                        duration: 300,
-                        easing: (t) => t * (2 - t) // Smooth easing function
-                    });
+                frame++;
+                const progress = frame / ANIMATION_FRAMES;
+                const easing = cubicEaseOut(progress);
+                
+                currentBearing = interpolateBearing(lastBearing, targetBearing, easing);
+                
+                if (userMarker) {
+                    userMarker.setRotation(currentBearing);
+                    
+                    if (isNavigating && followUser) {
+                        map.easeTo({
+                            bearing: currentBearing,
+                            duration: 16, // Shorter duration for smoother updates
+                            easing: cubicEaseOut
+                        });
+                    }
                 }
+                
+                requestAnimationFrame(animate);
             }
             
-            lastBearing = bearing;
+            animate();
+            lastBearing = targetBearing;
         }
 
+        function cubicEaseOut(t) {
+            return 1 - Math.pow(1 - t, 3);
+        }
+
+        function interpolateBearing(start, end, progress) {
+            let delta = end - start;
+            
+            // Handle 360 degree wrapping
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            
+            return start + (delta * progress);
+        }
         function smoothBearing(newBearing) {
             // Handle 360 degree wrapping
             let delta = newBearing - lastBearing;
@@ -1572,6 +1595,86 @@
             document.getElementById('navigation-panel').classList.add('hidden');
             isNavigating = false;
         });
+        let windLayer = null;
+        const OPENWEATHER_API_KEY = '2743b4a0f99648c34789d9dcfb3ad81d'; // Get from OpenWeatherMap
+
+        // Add wind control button
+        const windControl = document.createElement('button');
+        windControl.className = 'wind-control';
+        windControl.innerHTML = `
+            <svg viewBox="0 0 24 24" width="24" height="24">
+                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="#4a90e2"/>
+            </svg>
+        `;
+
+        map.addControl({
+            onAdd: function(map) {
+                return windControl;
+            },
+            onRemove: function(map) {
+                windControl.remove();
+            }
+        }, 'top-right');
+
+        // Toggle wind layer
+        windControl.addEventListener('click', toggleWindLayer);
+
+        function toggleWindLayer() {
+            if (windLayer) {
+                map.removeLayer('wind-layer');
+                windLayer = null;
+                windControl.classList.remove('active');
+            } else {
+                // Add wind layer using OpenWeatherMap tiles
+                map.addLayer({
+                    'id': 'wind-layer',
+                    'type': 'raster',
+                    'source': {
+                        'type': 'raster',
+                        'tiles': [
+                            `https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=${OPENWEATHER_API_KEY}`
+                        ],
+                        'tileSize': 256
+                    },
+                    'paint': {
+                        'raster-opacity': 0.6
+                    }
+                });
+                
+                windLayer = true;
+                windControl.classList.add('active');
+            }
+        }
+
+        // Add styles for wind control
+        const styles = `
+        .wind-control {
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            background: white;
+            border: none;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px;
+            transition: background-color 0.3s;
+        }
+
+        .wind-control.active {
+            background: #4a90e2;
+        }
+
+        .wind-control.active svg path {
+            fill: white;
+        }
+        `;
+
+        const styleSheet = document.createElement('style');
+        styleSheet.textContent = styles;
+        document.head.appendChild(styleSheet);
     </script>
 </body>
 </html>
