@@ -311,6 +311,51 @@
     #finishSearchBox {
         width: 100% !important;
     }
+    .wind-button {
+        position: fixed !important;
+        bottom: 150px !important; /* Above reset button */
+        right: 30px !important;
+        width: 50px !important;
+        height: 50px !important;
+        border-radius: 50% !important;
+        background: white !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
+        border: none !important;
+        cursor: pointer !important;
+        z-index: 1000 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 12px !important;
+        transition: transform 0.2s, background-color 0.2s !important;
+    }
+
+    .wind-button:hover {
+        background: #f5f5f5 !important;
+        transform: scale(1.1) !important;
+    }
+
+    .wind-button.active {
+        background: #4a90e2 !important;
+    }
+
+    .wind-button.active svg {
+        fill: white !important;
+    }
+    #windButton {
+        /* Add these styles to your CSS */
+        cursor: pointer;
+    }
+
+    #windButton.active {
+        background-color: #4CAF50;
+        color: white;
+    }
+
+    #windButton:disabled {
+        cursor: wait;
+        opacity: 0.6;
+    }
 </style>
 <body>
     <div class='map-view'>
@@ -332,7 +377,11 @@
                     <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                 </svg>
             </button>
-
+            <button class="wind-button" id="windButton">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="#4a90e2">
+                    <path d="M14.5 17.5c0-1.65-1.35-3-3-3h-7v-2h7c2.76 0 5 2.24 5 5s-2.24 5-5 5-5-2.24-5-5h2c0 1.65 1.35 3 3 3s3-1.35 3-3zM19 6.5h-7c-2.76 0-5 2.24-5 5s2.24 5 5 5h7v2h-7c-3.87 0-7-3.13-7-7s3.13-7 7-7h7v2z"/>
+                </svg>
+            </button>
         </div>
         
     </div>
@@ -384,7 +433,7 @@
         const WEATHER_UPDATE_DELAY = 200; // 1 секунда
         // Константы для погоды
         const WEATHER_ZOOM_LEVEL = 12; // Минимальный зум для показа погоды
-        const GRID_SIZE = 200; // Размер сетки в метрах
+        const GRID_SIZE = 500; // Размер сетки в метрах
         const WEATHER_ICONS = {
             'snow': '❄️',
             'rain': '🌧️',
@@ -394,7 +443,7 @@
         const LOCATION_OPTIONS = {
             enableHighAccuracy: true, // Высокая точность
             maximumAge: 0,           // Всегда получать свежие данные
-            timeout: 5000            // Таймаут в 5 секунд
+            timeout: 1000            // Таймаут в 5 секунд
         };
         const WEATHER_UPDATE_INTERVAL = 10 * 60 * 1000; // 10 минут вместо 5
         const WEATHER_CACHE_DURATION = 30 * 60 * 1000; // 30 минут кэширования
@@ -603,8 +652,8 @@
                 let marker = markerPool.pop();
                 if (!marker) {
                     const markerElement = document.createElement('div');
-                    markerElement.style.width = '75px';
-                    markerElement.style.height = '75px';
+                    markerElement.style.width = '150px';
+                    markerElement.style.height = '150px';
                     markerElement.style.backgroundSize = 'contain';
                     markerElement.style.backgroundRepeat = 'no-repeat';
                     markerElement.style.backgroundPosition = 'center';
@@ -686,67 +735,30 @@
 
         // Initialize the map
         var userMarker;
-        let lastBearing = 0;
-        const SMOOTHING_FACTOR = 0.05; // Reduced for smoother transitions
-        const ANIMATION_FRAMES = 60; // More frames for smoother animation
-
         function handleDeviceOrientation(event) {
             if (!event.alpha) return;
             
-            let targetBearing = event.webkitCompassHeading || (360 - event.alpha);
-            
-            // Enhanced smooth bearing changes
-            let currentBearing = lastBearing;
-            let frame = 0;
-            
-            function animate() {
-                if (frame >= ANIMATION_FRAMES) return;
-                
-                frame++;
-                const progress = frame / ANIMATION_FRAMES;
-                const easing = cubicEaseOut(progress);
-                
-                currentBearing = interpolateBearing(lastBearing, targetBearing, easing);
-                
-                if (userMarker) {
-                    userMarker.setRotation(currentBearing);
-                    
-                    if (isNavigating && followUser) {
-                        map.easeTo({
-                            bearing: currentBearing,
-                            duration: 16, // Shorter duration for smoother updates
-                            easing: cubicEaseOut
-                        });
-                    }
-                }
-                
-                requestAnimationFrame(animate);
+            // Convert compass heading to bearing
+            let bearing = event.alpha;
+            if (event.webkitCompassHeading) {
+                // iOS devices
+                bearing = event.webkitCompassHeading;
+            } else {
+                // Android devices
+                bearing = 360 - event.alpha;
             }
-            
-            animate();
-            lastBearing = targetBearing;
-        }
 
-        function cubicEaseOut(t) {
-            return 1 - Math.pow(1 - t, 3);
-        }
-
-        function interpolateBearing(start, end, progress) {
-            let delta = end - start;
-            
-            // Handle 360 degree wrapping
-            if (delta > 180) delta -= 360;
-            if (delta < -180) delta += 360;
-            
-            return start + (delta * progress);
-        }
-        function smoothBearing(newBearing) {
-            // Handle 360 degree wrapping
-            let delta = newBearing - lastBearing;
-            if (delta > 180) delta -= 360;
-            if (delta < -180) delta += 360;
-            
-            return lastBearing + (delta * SMOOTHING_FACTOR);
+            if (userMarker) {
+                userMarker.setRotation(bearing);
+                
+                // If in navigation mode, rotate map to match device orientation
+                if (isNavigating && followUser) {
+                    map.easeTo({
+                        bearing: bearing,
+                        duration: 300
+                    });
+                }
+            }
         }
         function updateNavigationBearing(userLocation, nextPoint) {
             const bearing = calculateBearing(
@@ -926,23 +938,24 @@
         // Initialize the geolocate control
 
         map.on('load', function() {
-            let startDist = 0;
+            let startX = 0;
+            let startY = 0;
             let startBearing = 0;
             let isDragging = false;
 
-            // Enable rotation and zoom
+            // Enable rotation
             map.touchZoomRotate.enable();
             map.touchZoomRotate.enableRotation();
 
             // Handle touch start
             map.getCanvas().addEventListener('touchstart', function(e) {
                 if (e.touches.length === 2) {
-                    // Calculate initial distance between touches for zoom
-                    const dx = e.touches[0].clientX - e.touches[1].clientX;
-                    const dy = e.touches[0].clientY - e.touches[1].clientY;
-                    startDist = Math.sqrt(dx * dx + dy * dy);
-                    startBearing = map.getBearing();
                     isDragging = true;
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    startX = (touch1.clientX + touch2.clientX) / 2;
+                    startY = (touch1.clientY + touch2.clientY) / 2;
+                    startBearing = map.getBearing();
                 }
             });
 
@@ -950,39 +963,18 @@
             map.getCanvas().addEventListener('touchmove', function(e) {
                 if (!isDragging || e.touches.length !== 2) return;
 
-                // Calculate current distance for zoom
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                const centerX = (touch1.clientX + touch2.clientX) / 2;
+                const centerY = (touch1.clientY + touch2.clientY) / 2;
 
-                // Determine if user is trying to zoom or rotate
-                const deltaDistance = dist - startDist;
+                // Calculate rotation angle
+                const angle = Math.atan2(centerY - startY, centerX - startX) * 180 / Math.PI;
                 
-                if (Math.abs(deltaDistance) > 10) {
-                    // User is trying to zoom
-                    const scale = dist / startDist;
-                    const zoom = map.getZoom();
-                    map.easeTo({
-                        zoom: zoom + Math.log2(scale),
-                        duration: 0
-                    });
-                    startDist = dist;
-                } else {
-                    // User is trying to rotate
-                    const center = {
-                        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-                    };
-                    const bearing = Math.atan2(
-                        e.touches[1].clientY - e.touches[0].clientY,
-                        e.touches[1].clientX - e.touches[0].clientX
-                    ) * 180 / Math.PI;
-                    
-                    map.easeTo({
-                        bearing: startBearing + bearing,
-                        duration: 0
-                    });
-                }
+                // Update map bearing
+                map.setBearing(startBearing + angle);
+                
+                e.preventDefault(); // Prevent default gestures
             });
 
             // Handle touch end
@@ -994,7 +986,7 @@
             
             // Set initial user location as start point if available
             let lastUpdate = 0;
-            var options = { enableHighAccuracy: true, maximumAge: 100, timeout: 50000 };
+            var options = { enableHighAccuracy: true, maximumAge: 100, timeout: 10000 };
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(function(position, options) {
                     const userLocation = [position.coords.longitude, position.coords.latitude];
@@ -1283,6 +1275,12 @@
                 });*/
                 userMarker.setLngLat(userLocation);
                 userMarker.setRotation(heading);
+                if (followUser) {
+                    map.easeTo({
+                        center: userLocation,
+                        duration: 1000
+                    });
+                }
             }
             routePoints.start = userLocation;
             if (routePoints.finish && followUser) {
@@ -1549,18 +1547,21 @@
         document.getElementById('startNavigation').addEventListener('click', function() {
             const followButton = document.getElementById('followButton');
             const resetButton = document.getElementById('resetButton');
+            const windButton = document.getElementById('windButton');
             
-            // Adjust button positions
-            followButton.style.bottom = '120px'; // Above navigation panel
-            resetButton.style.bottom = '180px'; // Above follow button
+            followButton.style.bottom = '120px';
+            resetButton.style.bottom = '180px';
+            windButton.style.bottom = '240px';
         });
+
         document.getElementById('stopNavigation').addEventListener('click', function() {
             const followButton = document.getElementById('followButton');
             const resetButton = document.getElementById('resetButton');
+            const windButton = document.getElementById('windButton');
             
-            // Reset button positions
             followButton.style.bottom = '30px';
             resetButton.style.bottom = '90px';
+            windButton.style.bottom = '150px';
         });
         // Initialize orientation tracking
         document.addEventListener('DOMContentLoaded', () => {
@@ -1595,86 +1596,12 @@
             document.getElementById('navigation-panel').classList.add('hidden');
             isNavigating = false;
         });
-        let windLayer = null;
-        const OPENWEATHER_API_KEY = '2743b4a0f99648c34789d9dcfb3ad81d'; // Get from OpenWeatherMap
+        const OPENWEATHER_API_KEY = '2743b4a0f99648c34789d9dcfb3ad81d';
+       
+       
 
-        // Add wind control button
-        const windControl = document.createElement('button');
-        windControl.className = 'wind-control';
-        windControl.innerHTML = `
-            <svg viewBox="0 0 24 24" width="24" height="24">
-                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="#4a90e2"/>
-            </svg>
-        `;
-
-        map.addControl({
-            onAdd: function(map) {
-                return windControl;
-            },
-            onRemove: function(map) {
-                windControl.remove();
-            }
-        }, 'top-right');
-
-        // Toggle wind layer
-        windControl.addEventListener('click', toggleWindLayer);
-
-        function toggleWindLayer() {
-            if (windLayer) {
-                map.removeLayer('wind-layer');
-                windLayer = null;
-                windControl.classList.remove('active');
-            } else {
-                // Add wind layer using OpenWeatherMap tiles
-                map.addLayer({
-                    'id': 'wind-layer',
-                    'type': 'raster',
-                    'source': {
-                        'type': 'raster',
-                        'tiles': [
-                            `https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=${OPENWEATHER_API_KEY}`
-                        ],
-                        'tileSize': 256
-                    },
-                    'paint': {
-                        'raster-opacity': 0.6
-                    }
-                });
-                
-                windLayer = true;
-                windControl.classList.add('active');
-            }
-        }
-
-        // Add styles for wind control
-        const styles = `
-        .wind-control {
-            width: 40px;
-            height: 40px;
-            border-radius: 4px;
-            background: white;
-            border: none;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 10px;
-            transition: background-color 0.3s;
-        }
-
-        .wind-control.active {
-            background: #4a90e2;
-        }
-
-        .wind-control.active svg path {
-            fill: white;
-        }
-        `;
-
-        const styleSheet = document.createElement('style');
-        styleSheet.textContent = styles;
-        document.head.appendChild(styleSheet);
+        // Modified getWindData function with error handling
+        
     </script>
 </body>
 </html>
