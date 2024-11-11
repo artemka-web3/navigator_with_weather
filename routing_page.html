@@ -75,13 +75,74 @@
     .icon-wrapper {
         width: 100% !important;
     }
+    .weather-marker {
+        width: 50px !important;
+        height: 50px !important;
+        display: block !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        z-index: 1000 !important;
+    }
+
+    .mapboxgl-marker {
+        display: block !important;
+        opacity: 1 !important;
+        z-index: 1000 !important;
+    }
+
+    /* Adjust icon size based on zoom level */
+    @media (max-width: 768px) {
+        .weather-marker {
+            width: calc(10vw + 15px);
+        }
+    }
 
     @media (max-width: 768px) {
         .search-panel {
             padding: 10px !important;
         }
     }
+    .tt-icon {
+        width: 24px !important;
+        height: 24px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin: auto !important;
+    }
+
+    .tt-icon.-white {
+        color: white !important;
+    }
+
+    .tt-icon.-finish {
+        background: url('../assets/ui-library/icons/finish.svg') no-repeat center !important;
+        background-size: contain !important;
+    }
+
+    .tt-icon.-start {
+        background: url('../assets/ui-library/icons/start.svg') no-repeat center !important;
+        background-size: contain !important;
+    }
+
+    /* Ensure marker wrapper is properly sized */
+    .mapboxgl-marker > div {
+        width: 100% !important;
+        height: 100% !important;
+    }
     /* Add your styles here */
+    .draggable-marker {
+        width: 32px !important;
+        height: 32px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background-color: #4a90e2 !important;
+        border: solid 3px #2faaff !important;
+        border-radius: 50% !important;
+        cursor: pointer !important;
+        transform-origin: center !important;
+    }
     .map-view .draggable-marker {
         align-items: center;
         background-color: #4a90e2;
@@ -311,6 +372,50 @@
     #finishSearchBox {
         width: 100% !important;
     }
+    .control-buttons {
+        position: fixed;
+        right: 30px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        z-index: 1002;
+    }
+    .wind-button,
+    .reset-button,
+    .follow-button {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: white;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        transition: transform 0.2s, background-color 0.2s;
+    }
+    .wind-button:hover,
+    .reset-button:hover,
+    .follow-button:hover {
+        background: #f5f5f5;
+        transform: scale(1.1);
+    }
+    .navigation-active .control-buttons {
+        right: 30px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    .wind-button.active {
+        background: #4a90e2;
+    }
+
+    .wind-button.active svg {
+        fill: white;
+    }
     .wind-button {
         position: fixed !important;
         bottom: 150px !important; /* Above reset button */
@@ -356,6 +461,24 @@
         cursor: wait;
         opacity: 0.6;
     }
+    #geolocation-error {
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translate(-50%, -20px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    .navigation-active .follow-button {
+        bottom: 220px !important; /* Above navigation panel */
+    }
+    .navigation-active .reset-button {
+        bottom: 280px !important;
+    }
+    .navigation-active .wind-button {
+        bottom: 340px !important;
+    }
 </style>
 <body>
     <div class='map-view'>
@@ -366,10 +489,12 @@
                     <div id='finishSearchBox' class='tt-form-label'></div>
                 </div>
             </div>
-            <button class="follow-button" id="followButton">
-                <svg class="location-arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 8l-6 13l6-4l6 4l-6-13z" fill="#4a90e2"/>
-                    <circle cx="12" cy="8" r="6" fill="#4a90e2"/>
+            
+        </div>
+        <div class="control-buttons">
+            <button class="wind-button" id="windButton">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="#4a90e2">
+                    <path d="M14.5 17.5c0-1.65-1.35-3-3-3h-7v-2h7c2.76 0 5 2.24 5 5s-2.24 5-5 5-5-2.24-5-5h2c0 1.65 1.35 3 3 3s3-1.35 3-3zM19 6.5h-7c-2.76 0-5 2.24-5 5s2.24 5 5 5h7v2h-7c-3.87 0-7-3.13-7-7s3.13-7 7-7h7v2z"/>
                 </svg>
             </button>
             <button class="reset-button" id="resetButton">
@@ -377,13 +502,13 @@
                     <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                 </svg>
             </button>
-            <button class="wind-button" id="windButton">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="#4a90e2">
-                    <path d="M14.5 17.5c0-1.65-1.35-3-3-3h-7v-2h7c2.76 0 5 2.24 5 5s-2.24 5-5 5-5-2.24-5-5h2c0 1.65 1.35 3 3 3s3-1.35 3-3zM19 6.5h-7c-2.76 0-5 2.24-5 5s2.24 5 5 5h7v2h-7c-3.87 0-7-3.13-7-7s3.13-7 7-7h7v2z"/>
+            <button class="follow-button" id="followButton">
+                <svg class="location-arrow" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 8l-6 13l6-4l6 4l-6-13z" fill="#4a90e2"/>
+                    <circle cx="12" cy="8" r="6" fill="#4a90e2"/>
                 </svg>
             </button>
         </div>
-        
     </div>
     <div class="confirmation-popup" id="confirmationPopup">
         <p>Построить маршрут до выбранной точки?</p>
@@ -645,44 +770,34 @@
         // Функция создания маркера погоды
         const markerPool = [];
         function createWeatherMarker(weather, lngLat) {
-            console.log('Creating weather marker:', weather, lngLat);
+            logWeatherDebug('Creating weather marker:', { weather, lngLat });
             
             try {
-                // Получаем маркер из пула или создаем новый
-                let marker = markerPool.pop();
-                if (!marker) {
-                    const markerElement = document.createElement('div');
-                    markerElement.style.width = '150px';
-                    markerElement.style.height = '150px';
-                    markerElement.style.backgroundSize = 'contain';
-                    markerElement.style.backgroundRepeat = 'no-repeat';
-                    markerElement.style.backgroundPosition = 'center';
-                    
-                    marker = new tt.Marker({
-                        element: markerElement,
-                        anchor: 'center'
-                    });
-                }
-
-                // Проверяем валидность координат
-                if (!lngLat || !Array.isArray(lngLat) || lngLat.length !== 2) {
-                    console.error('Invalid coordinates:', lngLat);
-                    return null;
-                }
-
-                // Обновляем иконку погоды
-                const element = marker.getElement();
-                element.style.backgroundImage = `url(assets/weather/${weather}.png)`;
-
-                // Устанавливаем позицию и добавляем на карту
-                marker.setLngLat(lngLat);
+                const markerElement = document.createElement('div');
+                markerElement.className = 'weather-marker';
                 
-                // Проверяем, не добавлен ли уже маркер на карту
-                if (!marker.getElement().parentNode) {
-                    marker.addTo(map);
-                }
+                // Force size and visibility
+                markerElement.style.cssText = `
+                    width: 50px;
+                    height: 50px;
+                    background-size: contain;
+                    background-repeat: no-repeat;
+                    background-position: center;
+                    background-image: url(assets/weather/${weather}.png);
+                    display: block !important;
+                    opacity: 1 !important;
+                    pointer-events: auto !important;
+                `;
 
-                console.log('Weather marker created successfully');
+                const marker = new tt.Marker({
+                    element: markerElement,
+                    anchor: 'center'
+                }).setLngLat(lngLat);
+
+                // Force marker to map
+                marker.addTo(map);
+                logWeatherDebug('Marker added to map:', { weather, lngLat });
+
                 return marker;
             } catch (error) {
                 console.error('Error creating weather marker:', error);
@@ -700,38 +815,54 @@
                 weatherMarkers = [];
             }
         }
-
-    // Улучшенная функция обновления погоды
-    async function updateWeather(userLocation) {
-        console.log('Updating weather markers');
-        
-        // Проверяем зум
-        if (map.getZoom() < WEATHER_ZOOM_LEVEL) {
-            console.log('Zoom too low, clearing markers');
-            clearWeatherMarkers();
-            return;
+        function logWeatherDebug(message, data) {
+            console.log(`[Weather Debug] ${message}`, data);
         }
 
-        try {
-            // Очищаем старые маркеры
-            clearWeatherMarkers();
-
-            // Создаем новые маркеры
-            const gridPoints = createWeatherGrid(userLocation, GRID_SIZE);
+        // Улучшенная функция обновления погоды
+        async function updateWeather(userLocation) {
+            logWeatherDebug('Updating weather markers for location:', userLocation);
             
-            for (const point of gridPoints) {
-                const weather = await getWeather(point[1], point[0]);
-                const marker = createWeatherMarker(weather, point);
-                if (marker) {
-                    weatherMarkers.push(marker);
+            try {
+                // Check zoom level
+                const currentZoom = map.getZoom();
+                logWeatherDebug('Current zoom level:', currentZoom);
+                
+                if (currentZoom < WEATHER_ZOOM_LEVEL) {
+                    logWeatherDebug('Zoom too low, clearing markers');
+                    clearWeatherMarkers();
+                    return;
                 }
+
+                // Clear existing markers
+                clearWeatherMarkers();
+
+                // Create grid points
+                const grid = createWeatherGrid(userLocation, GRID_SIZE);
+                logWeatherDebug('Created grid points:', grid);
+
+                for (const point of grid) {
+                    try {
+                        const weather = await getWeather(point[1], point[0]);
+                        logWeatherDebug('Got weather for point:', { point, weather });
+
+                        const marker = createWeatherMarker(weather, point);
+                        if (marker) {
+                            weatherMarkers.push(marker);
+                            logWeatherDebug('Created marker:', { weather, point });
+                        } else {
+                            logWeatherDebug('Failed to create marker for:', { weather, point });
+                        }
+                    } catch (error) {
+                        console.error('Error processing grid point:', error);
+                    }
+                }
+
+                logWeatherDebug('Total markers created:', weatherMarkers.length);
+            } catch (error) {
+                console.error('Error in updateWeather:', error);
             }
-            
-            console.log(`Created ${weatherMarkers.length} weather markers`);
-        } catch (error) {
-            console.error('Error updating weather markers:', error);
         }
-    }
 
         // Initialize the map
         var userMarker;
@@ -1545,6 +1676,7 @@
             }
         });
         document.getElementById('startNavigation').addEventListener('click', function() {
+            document.body.classList.add('navigation-active');
             const followButton = document.getElementById('followButton');
             const resetButton = document.getElementById('resetButton');
             const windButton = document.getElementById('windButton');
@@ -1555,10 +1687,11 @@
         });
 
         document.getElementById('stopNavigation').addEventListener('click', function() {
+            document.body.classList.remove('navigation-active');
+
             const followButton = document.getElementById('followButton');
             const resetButton = document.getElementById('resetButton');
             const windButton = document.getElementById('windButton');
-            
             followButton.style.bottom = '30px';
             resetButton.style.bottom = '90px';
             windButton.style.bottom = '150px';
@@ -1598,7 +1731,108 @@
         });
         const OPENWEATHER_API_KEY = '2743b4a0f99648c34789d9dcfb3ad81d';
        
-       
+        // Add these variables at the top
+        let geolocationRetries = 0;
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 2000; // 2 seconds
+        let lastKnownPosition = null;
+
+        // Enhanced geolocation handling
+        function initGeolocation() {
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 10000,        // 10 second timeout
+                maximumAge: 1000      // Accept cached positions up to 1 second old
+            };
+
+            function onSuccess(position) {
+                geolocationRetries = 0;
+                lastKnownPosition = position;
+                updateUserLocation(position);
+                hideGeolocationError();
+            }
+
+            function onError(error) {
+                console.error('Geolocation error:', error);
+                
+                // Show specific error messages
+                let errorMsg = '';
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMsg = 'Пожалуйста, разрешите доступ к геолокации';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMsg = 'Информация о местоположении недоступна';
+                        break;
+                    case error.TIMEOUT:
+                        errorMsg = 'Истекло время ожидания определения местоположения';
+                        break;
+                    default:
+                        errorMsg = 'Произошла ошибка при определении местоположения';
+                }
+
+                showGeolocationError(errorMsg);
+
+                // Retry logic
+                if (geolocationRetries < MAX_RETRIES) {
+                    geolocationRetries++;
+                    setTimeout(() => {
+                        navigator.geolocation.getCurrentPosition(onSuccess, onError, options);
+                    }, RETRY_DELAY);
+                }
+
+                // Use last known position if available
+                if (lastKnownPosition) {
+                    updateUserLocation(lastKnownPosition);
+                }
+            }
+
+            // Start watching position with enhanced error handling
+            const watchId = navigator.geolocation.watchPosition(onSuccess, onError, options);
+
+            // Periodic position check
+            setInterval(() => {
+                navigator.geolocation.getCurrentPosition(onSuccess, onError, options);
+            }, 10000); // Check every 10 seconds
+
+            return watchId;
+        }
+
+        // Add error display functions
+        function showGeolocationError(message) {
+            let errorDiv = document.getElementById('geolocation-error');
+            if (!errorDiv) {
+                errorDiv = document.createElement('div');
+                errorDiv.id = 'geolocation-error';
+                errorDiv.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: rgba(255, 0, 0, 0.8);
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    z-index: 1000;
+                `;
+                document.body.appendChild(errorDiv);
+            }
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideGeolocationError() {
+            const errorDiv = document.getElementById('geolocation-error');
+            if (errorDiv) {
+                errorDiv.style.display = 'none';
+            }
+        }
+
+        // Replace the existing geolocation initialization with:
+        document.addEventListener('DOMContentLoaded', () => {
+            enableOrientationTracking();
+            initGeolocation();
+        });
 
         // Modified getWindData function with error handling
         
