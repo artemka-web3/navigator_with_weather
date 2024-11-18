@@ -1040,6 +1040,41 @@
                 }
             }
         }
+        let routeWeatherGridState = {
+    markers: [],
+    exists: false
+};
+
+        // Function to create weather grids around route points
+        async function createRouteWeatherGrids(coordinates) {
+            // Clear existing route grid markers
+            routeWeatherGridState.markers.forEach(marker => marker.remove());
+            routeWeatherGridState.markers = [];
+
+            // Get points every 10km along route
+            const routePoints = divideRouteIntoSegments(coordinates, 10000);
+            
+            // Create weather grid around each route point
+            for (const centerPoint of routePoints) {
+                // Generate grid points around center
+                const gridPoints = createWeatherGrid(centerPoint, GRID_SIZE);
+                
+                // Create weather markers for each grid point
+                for (const point of gridPoints) {
+                    try {
+                        const weather = await getWeather(point[1], point[0]);
+                        const marker = createWeatherMarker(weather, point);
+                        if (marker) {
+                            routeWeatherGridState.markers.push(marker);
+                        }
+                    } catch (error) {
+                        console.error('Error creating route grid weather marker:', error);
+                    }
+                }
+            }
+            
+            routeWeatherGridState.exists = true;
+        }
         function updateNavigationBearing(userLocation, nextPoint) {
             const bearing = calculateBearing(
                 [userLocation.lng, userLocation.lat],
@@ -1727,7 +1762,8 @@
 
                 // Save route coordinates
                 routeCoordinates = geojson.features[0].geometry.coordinates;
-                await createRouteWeatherMarkers(routeCoordinates);
+                await createRouteWeatherGrids(routeCoordinates);
+                //await createRouteWeatherMarkers(routeCoordinates);
                 // Fetch weather data and display markers
                 //const weatherData = await fetchWeatherForSegments(segments);
                 //displayWeatherMarkers(weatherData);
@@ -1846,6 +1882,9 @@
             if (fullClear) {
                 clearUserWeatherMarkers();
                 clearRouteWeatherMarkers();
+                routeWeatherGridState.markers.forEach(marker => marker.remove());
+                routeWeatherGridState.markers = [];
+                routeWeatherGridState.exists = false;
             }
         }
 
