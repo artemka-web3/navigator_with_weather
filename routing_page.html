@@ -618,14 +618,14 @@
         var weatherPopups = [];
         var followUser = true;
         var weatherZoomLevel = 12; // Set the zoom level at which weather will be displayed
-        var weatherGridSize = 200; // Size of the grid around the user in meters
+        var weatherGridSize = 1000; // Size of the grid around the user in meters
         const weatherCache = new Map();
         const CACHE_DURATION = 10 * 60 * 1000; // 10 минут
         let weatherUpdateTimeout;
         const WEATHER_UPDATE_DELAY = 200; // 1 секунда
         // Константы для погоды
         const WEATHER_ZOOM_LEVEL = 12; // Минимальный зум для показа погоды
-        const GRID_SIZE = 500; // Размер сетки в метрах
+        const GRID_SIZE = 1000; // Размер сетки в метрах
         const WEATHER_ICONS = {
             'snow': '❄️',
             'rain': '🌧️',
@@ -648,25 +648,36 @@
         function clearRouteWeatherMarkers() {
             routeWeatherMarkers.forEach(marker => marker.remove());
             routeWeatherMarkers = [];
+
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
+            routeWeatherState.exists = false;
+
+            
         }
+
+        
 
         async function updateUserWeather(userLocation) {
             try {
-                clearUserWeatherMarkers();
+                // Clear only user weather markers
+                userWeatherState.markers.forEach(marker => marker.remove());
+                userWeatherState.markers = [];
 
                 const grid = createWeatherGrid(userLocation, GRID_SIZE);
 
                 for (const point of grid) {
                     try {
                         const weather = await getWeather(point[1], point[0]);
-                        const marker = createWeatherMarker(weather, point, false);
+                        const marker = createWeatherMarker(weather, point);
                         if (marker) {
-                            userWeatherMarkers.push(marker);
+                            userWeatherState.markers.push(marker); // Store in user markers array
                         }
                     } catch (error) {
                         console.error('Error processing user weather point:', error);
                     }
                 }
+                userWeatherState.lastLocation = userLocation;
             } catch (error) {
                 console.error('Error in updateUserWeather:', error);
             }
@@ -968,11 +979,21 @@
             }
 
         }
+        let userWeatherState = {
+            markers: [],
+            lastLocation: null
+        };
         let routeWeatherState = {
             markers: [],
             coordinates: [],
-            exists: false
+            exists: false,
+            isPersistent: true
         };
+        function clearRouteWeatherMarkers() {
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
+            routeWeatherState.exists = false;
+        }
         function clearWeatherMarkers() {
             if (weatherMarkers.length) {
                 weatherMarkers.forEach(marker => {
@@ -1040,16 +1061,12 @@
                 }
             }
         }
-        let routeWeatherGridState = {
-    markers: [],
-    exists: false
-};
-
+        
         // Function to create weather grids around route points
         async function createRouteWeatherGrids(coordinates) {
             // Clear existing route grid markers
-            routeWeatherGridState.markers.forEach(marker => marker.remove());
-            routeWeatherGridState.markers = [];
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
 
             // Get points every 10km along route
             const routePoints = divideRouteIntoSegments(coordinates, 10000);
@@ -1065,7 +1082,7 @@
                         const weather = await getWeather(point[1], point[0]);
                         const marker = createWeatherMarker(weather, point);
                         if (marker) {
-                            routeWeatherGridState.markers.push(marker);
+                            routeWeatherState.markers.push(marker);
                         }
                     } catch (error) {
                         console.error('Error creating route grid weather marker:', error);
@@ -1073,7 +1090,7 @@
                 }
             }
             
-            routeWeatherGridState.exists = true;
+            routeWeatherState.exists = true;
         }
         function updateNavigationBearing(userLocation, nextPoint) {
             const bearing = calculateBearing(
@@ -1237,7 +1254,15 @@
                 updateWeather(userLocation);
             }, WEATHER_UPDATE_DELAY);
         }
-
+        function debouncedUpdateUserWeather(userLocation) {
+            if (weatherUpdateTimeout) {
+                clearTimeout(weatherUpdateTimeout);
+            }
+            
+            weatherUpdateTimeout = setTimeout(() => {
+                updateUserWeather(userLocation);
+            }, WEATHER_UPDATE_DELAY);
+        }
         map.on('zoomend', function() {
             if (userMarker) {
                 const userLocation = userMarker.getLngLat();
@@ -1250,7 +1275,7 @@
                 }
 
                 // Маркеры маршрута всегда остаются видимыми
-                if (routeWeatherState.exists) {
+                if (routeWeatherState.exists && routeWeatherState.isPersistent) {
                     routeWeatherState.markers.forEach(marker => {
                         if (!marker.getElement().isConnected) {
                             marker.addTo(map);
@@ -1604,52 +1629,37 @@
                 handleDrawRoute('finish');
             }
         }*/
+        function clearRouteGridMarkers() {
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
+            routeWeatherState.exists = false;
+        }
         function updateUserLocation(position) {
-            const { longitude, latitude, accuracy, heading } = position.coords;
+            const { longitude, latitude, heading } = position.coords;
             const userLocation = [longitude, latitude];
 
             if (!userMarker) {
-                userMarker = new tt.Marker({
-                    draggable: true,
-                    element: createArrowMarker(),
-                    rotationAlignment: 'map'
-                }).setLngLat(userLocation)
-                  .addTo(map);
-                userMarker.on('dragend', function() {
-                    var newPos = userMarker.getLngLat();
-                    routePoints.start = [newPos.lng, newPos.lat];
-                    if (routePoints.finish) {
-                        handleDrawRoute('finish');
-                    }
-                });
+                userMarker = createUserMarker(position);
             } else {
-                // Smooth animation for marker movement
-                /*userMarker.animate({ 
-                    coordinates: [longitude, latitude],
-                    duration: 1000,
-                    easing: 'linear'
-                });*/
                 userMarker.setLngLat(userLocation);
                 userMarker.setRotation(heading);
-                if (followUser) {
-                    map.easeTo({
-                        center: userLocation,
-                        duration: 1000
-                    });
-                }
             }
+
             routePoints.start = userLocation;
-            if (routePoints.finish && followUser) {
-                handleDrawRoute('finish');
-            }
+
             if (followUser) {
-                // Smooth map movement
                 map.easeTo({
                     center: userLocation,
                     duration: 1000
                 });
+                
+                // Update only user weather, preserve route weather
+                if (map.getZoom() >= WEATHER_ZOOM_LEVEL) {
+                    debouncedUpdateUserWeather(userLocation);
+                }
             }
         }
+        
       
     
         let isDrivingMode = false;
@@ -1692,7 +1702,8 @@
             }
 
             // Очищаем старые маркеры
-            clearRouteWeatherMarkers();
+            //clearRouteWeatherMarkers();
+            clearRouteGridMarkers();
 
             // Создаем точки каждые 5км
             const segments = divideRouteIntoSegments(coordinates, 5000);
@@ -1762,7 +1773,9 @@
 
                 // Save route coordinates
                 routeCoordinates = geojson.features[0].geometry.coordinates;
-                await createRouteWeatherGrids(routeCoordinates);
+                if (!routeWeatherState.exists) {
+                    await createRouteWeatherGrids(routeCoordinates);
+                }
                 //await createRouteWeatherMarkers(routeCoordinates);
                 // Fetch weather data and display markers
                 //const weatherData = await fetchWeatherForSegments(segments);
@@ -1878,16 +1891,19 @@
                 map.removeLayer('route');
                 map.removeSource('route');
             }
-
             if (fullClear) {
                 clearUserWeatherMarkers();
                 clearRouteWeatherMarkers();
-                routeWeatherGridState.markers.forEach(marker => marker.remove());
-                routeWeatherGridState.markers = [];
-                routeWeatherGridState.exists = false;
             }
+            /*if (fullClear) {
+                clearUserWeatherMarkers();
+                clearRouteWeatherMarkers();
+                routeWeatherState.markers.forEach(marker => marker.remove());
+                routeWeatherState.markers = [];
+                routeWeatherState.exists = false;
+            }*/
         }
-
+        
         function centerMap(lngLat) {
             map.flyTo({
                 center: lngLat,
@@ -2002,6 +2018,10 @@
             }
             weatherMarkers.forEach(marker => marker.remove());
             weatherMarkers = [];
+
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
+            routeWeatherState.exists = false;
             // Clear route points
             clearMap(true); // Full clear including weather markers
             routePoints.finish = null;
