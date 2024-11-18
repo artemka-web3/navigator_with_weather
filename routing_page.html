@@ -506,12 +506,28 @@
         justify-content: center;
     }
 
+    /* Styles for weather marker */
+    .weather-marker {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: white;
+        padding: 5px;
+        border-radius: 5px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
     .weather-icon {
         width: 32px;
         height: 32px;
-        background-size: contain;
-        background-repeat: no-repeat;
+        background-size: cover;
         background-position: center;
+    }
+
+    .weather-temp {
+        font-size: 12px;
+        font-weight: bold;
+        margin-top: 4px;
     }
 
     @keyframes fadeIn {
@@ -597,6 +613,8 @@
         var routePoints = {};
         var searchBoxes = {};
         var weatherMarkers = [];
+        let userWeatherMarkers = [];
+        let routeWeatherMarkers = [];
         var weatherPopups = [];
         var followUser = true;
         var weatherZoomLevel = 12; // Set the zoom level at which weather will be displayed
@@ -627,6 +645,42 @@
         let currentRouteIndex = 0;
         const speechSynthesis = window.speechSynthesis;
 
+        function clearRouteWeatherMarkers() {
+            routeWeatherMarkers.forEach(marker => marker.remove());
+            routeWeatherMarkers = [];
+        }
+
+        async function updateUserWeather(userLocation) {
+            try {
+                clearUserWeatherMarkers();
+
+                const grid = createWeatherGrid(userLocation, GRID_SIZE);
+
+                for (const point of grid) {
+                    try {
+                        const weather = await getWeather(point[1], point[0]);
+                        const marker = createWeatherMarker(weather, point, false);
+                        if (marker) {
+                            userWeatherMarkers.push(marker);
+                        }
+                    } catch (error) {
+                        console.error('Error processing user weather point:', error);
+                    }
+                }
+            } catch (error) {
+                console.error('Error in updateUserWeather:', error);
+            }
+        }
+
+        function clearUserWeatherMarkers() {
+            userWeatherMarkers.forEach(marker => {
+                if (marker) {
+                    marker.remove();
+                    markerPool.push(marker);
+                }
+            });
+            userWeatherMarkers = [];
+        }
         function startNavigation() {
             isNavigating = true;
             followUser = true;
@@ -701,6 +755,59 @@
                     speakInstruction(instruction);
                 }
             }
+        }
+
+        // Function to divide route into segments every 'interval' meters
+        function divideRouteIntoSegments(coordinates, interval) {
+            const segments = [];
+            let accumulatedDistance = 0;
+            let lastPoint = coordinates[0];
+            segments.push(lastPoint);
+
+            for (let i = 1; i < coordinates.length; i++) {
+                const currentPoint = coordinates[i];
+                const distance = calculateDistance(lastPoint, currentPoint);
+                accumulatedDistance += distance;
+
+                if (accumulatedDistance >= interval) {
+                    segments.push(currentPoint);
+                    accumulatedDistance = 0;
+                }
+
+                lastPoint = currentPoint;
+            }
+
+            return segments;
+        }
+
+
+        // Function to fetch weather data for each segment point
+        async function fetchWeatherForSegments(segments) {
+            console.log('Fetching weather for segments:', segments.length);
+            const weatherPromises = segments.map(async (point, index) => {
+                console.log(`Fetching weather for segment ${index}:`, point);
+                const weather = await getWeather(point[1], point[0]);
+                return { point, weather };
+            });
+
+            return Promise.all(weatherPromises);
+        }
+        // Function to create and display weather markers on the map
+        function displayWeatherMarkers(weatherData) {
+            console.log('Displaying weather markers:', weatherData.length);
+            
+            // Clear existing markers
+            routeWeatherMarkers.forEach(marker => marker.remove());
+            routeWeatherMarkers = [];
+
+            weatherData.forEach(({ point, weather }) => {
+                const marker = createWeatherMarker(weather, point);
+                if (marker) {
+                    routeWeatherMarkers.push(marker);
+                }
+            });
+
+            console.log('Created weather markers:', routeWeatherMarkers.length);
         }
 
         function calculateRouteDistance(points) {
@@ -859,7 +966,13 @@
                 console.error('Error creating weather marker:', error);
                 return null;
             }
+
         }
+        let routeWeatherState = {
+            markers: [],
+            coordinates: [],
+            exists: false
+        };
         function clearWeatherMarkers() {
             if (weatherMarkers.length) {
                 weatherMarkers.forEach(marker => {
@@ -877,44 +990,24 @@
 
         // Улучшенная функция обновления погоды
         async function updateWeather(userLocation) {
-            logWeatherDebug('Updating weather markers for location:', userLocation);
-            
             try {
-                // Check zoom level
-                const currentZoom = map.getZoom();
-                logWeatherDebug('Current zoom level:', currentZoom);
-                
-                if (currentZoom < WEATHER_ZOOM_LEVEL) {
-                    logWeatherDebug('Zoom too low, clearing markers');
-                    clearWeatherMarkers();
-                    return;
-                }
+                // Очищаем только маркеры вокруг пользователя
+                weatherMarkers.forEach(marker => marker.remove());
+                weatherMarkers = [];
 
-                // Clear existing markers
-                clearWeatherMarkers();
-
-                // Create grid points
                 const grid = createWeatherGrid(userLocation, GRID_SIZE);
-                logWeatherDebug('Created grid points:', grid);
 
                 for (const point of grid) {
                     try {
                         const weather = await getWeather(point[1], point[0]);
-                        logWeatherDebug('Got weather for point:', { point, weather });
-
-                        const marker = createWeatherMarker(weather, point);
+                        const marker = createWeatherMarker(weather, point, false); // false означает, что это не маркер маршрута
                         if (marker) {
                             weatherMarkers.push(marker);
-                            logWeatherDebug('Created marker:', { weather, point });
-                        } else {
-                            logWeatherDebug('Failed to create marker for:', { weather, point });
                         }
                     } catch (error) {
                         console.error('Error processing grid point:', error);
                     }
                 }
-
-                logWeatherDebug('Total markers created:', weatherMarkers.length);
             } catch (error) {
                 console.error('Error in updateWeather:', error);
             }
@@ -1097,7 +1190,18 @@
             }
             return userMarker;
         }
-
+        function debouncedUpdateWeather(userLocation) {
+            console.log('Debounce called for weather update');
+            if (weatherUpdateTimeout) {
+                console.log('Clearing previous timeout');
+                clearTimeout(weatherUpdateTimeout);
+            }
+            
+            weatherUpdateTimeout = setTimeout(() => {
+                console.log('Executing delayed weather update');
+                updateWeather(userLocation);
+            }, WEATHER_UPDATE_DELAY);
+        }
 
         map.on('zoomend', function() {
             if (userMarker) {
@@ -1105,12 +1209,18 @@
                 const currentZoom = map.getZoom();
                 
                 if (currentZoom < WEATHER_ZOOM_LEVEL) {
-                    // Если зум меньше порога - очищаем маркеры
-                    weatherMarkers.forEach(marker => marker.remove());
-                    weatherMarkers = [];
+                    clearUserWeatherMarkers();
                 } else {
-                    // Если зум достаточный - обновляем погоду
-                    debouncedUpdateWeather([userLocation.lng, userLocation.lat]);
+                    debouncedUpdateUserWeather([userLocation.lng, userLocation.lat]);
+                }
+
+                // Маркеры маршрута всегда остаются видимыми
+                if (routeWeatherState.exists) {
+                    routeWeatherState.markers.forEach(marker => {
+                        if (!marker.getElement().isConnected) {
+                            marker.addTo(map);
+                        }
+                    });
                 }
             }
         });
@@ -1536,9 +1646,45 @@
             });
         }
 
-        
+        let routeExists = false;
 
+        // Обновим функцию создания маркеров погоды на маршруте
+        async function createRouteWeatherMarkers(coordinates) {
+            // Если маршрут уже существует и координаты те же, не пересоздаем маркеры
+            if (routeWeatherState.exists && 
+                JSON.stringify(coordinates) === JSON.stringify(routeWeatherState.coordinates)) {
+                return;
+            }
 
+            // Очищаем старые маркеры
+            clearRouteWeatherMarkers();
+
+            // Создаем точки каждые 5км
+            const segments = divideRouteIntoSegments(coordinates, 5000);
+            
+            for (const point of segments) {
+                try {
+                    const weather = await getWeather(point[1], point[0]);
+                    const marker = createWeatherMarker(weather, point);
+                    if (marker) {
+                        routeWeatherState.markers.push(marker);
+                    }
+                } catch (error) {
+                    console.error('Error creating route weather marker:', error);
+                }
+            }
+
+            // Сохраняем состояние
+            routeWeatherState.coordinates = coordinates;
+            routeWeatherState.exists = true;
+        }
+
+        // Обновим функцию очистки маркеров
+        function clearRouteWeatherMarkers() {
+            routeWeatherState.markers.forEach(marker => marker.remove());
+            routeWeatherState.markers = [];
+            routeWeatherState.exists = false;
+        }
         function handleDrawRoute(type) {
             if (!routePoints.start || !routePoints.finish) {
                 console.log('Missing route points:', routePoints);
@@ -1547,6 +1693,7 @@
 
             errorHint.hide();
             loadingHint.setMessage('Строим маршрут...');
+            clearMap(false);
 
             const startCoords = Array.isArray(routePoints.start) ? 
                 routePoints.start.join(',') : 
@@ -1561,9 +1708,8 @@
                 traffic: false,
                 locations: `${startCoords}:${finishCoords}`
             })
-            .then(function(response) {
+            .then(async function(response) {
                 const geojson = response.toGeoJson();
-                clearMap();
 
                 // Add route layer
                 map.addLayer({
@@ -1581,7 +1727,10 @@
 
                 // Save route coordinates
                 routeCoordinates = geojson.features[0].geometry.coordinates;
-
+                await createRouteWeatherMarkers(routeCoordinates);
+                // Fetch weather data and display markers
+                //const weatherData = await fetchWeatherForSegments(segments);
+                //displayWeatherMarkers(weatherData);
                 // Calculate initial bearing to next waypoint
                 if (userMarker && routeCoordinates.length > 1) {
                     const userLocation = userMarker.getLngLat();
@@ -1616,6 +1765,10 @@
             });
         }
 
+        function clearRouteWeatherMarkers() {
+            routeWeatherMarkers.forEach(marker => marker.remove());
+            routeWeatherMarkers = [];
+        }
         function enableDrivingMode(bearing) {
             isDrivingMode = true;
             followUser = true;
@@ -1684,13 +1837,16 @@
             }
         }
 
-        function clearMap() {
+        function clearMap(fullClear = false) {
             if (map.getLayer('route')) {
                 map.removeLayer('route');
                 map.removeSource('route');
             }
-            weatherMarkers.forEach(marker => marker.remove());
-            weatherMarkers = [];
+
+            if (fullClear) {
+                clearUserWeatherMarkers();
+                clearRouteWeatherMarkers();
+            }
         }
 
         function centerMap(lngLat) {
@@ -1808,6 +1964,7 @@
             weatherMarkers.forEach(marker => marker.remove());
             weatherMarkers = [];
             // Clear route points
+            clearMap(true); // Full clear including weather markers
             routePoints.finish = null;
             
             // Clear search box
